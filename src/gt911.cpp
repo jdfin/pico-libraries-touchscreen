@@ -255,10 +255,11 @@ int Gt911::read(Gt911::Reg reg, uint8_t *buf, int buf_len)
     const uint8_t xbuf[xbuf_len] = {uint8_t(reg >> 8), uint8_t(reg)};
 
     constexpr uint timeout_us = 10'000;
-    int err = _i2c.write_sync(_i2c_addr, xbuf, xbuf_len, true, timeout_us);
+    int err = _i2c.write_timeout_us(_i2c_addr, xbuf, xbuf_len, //
+                                    true, timeout_us);
     if (err != xbuf_len)
         return err;
-    return _i2c.read_sync(_i2c_addr, buf, buf_len, false, timeout_us);
+    return _i2c.read_timeout_us(_i2c_addr, buf, buf_len, false, timeout_us);
 }
 
 
@@ -277,8 +278,8 @@ int Gt911::write(Gt911::Reg reg, const uint8_t *buf, int buf_len)
         xbuf[sizeof(reg) + i] = buf[i];
 
     constexpr uint timeout_us = 10'000;
-    int ret = _i2c.write_sync(_i2c_addr, xbuf, sizeof(reg) + buf_len, false,
-                              timeout_us);
+    int ret = _i2c.write_timeout_us(_i2c_addr, xbuf, sizeof(reg) + buf_len,
+                                    false, timeout_us);
     if (ret >= 0)
         return ret - sizeof(reg); // return buf_len if everything went ok
     else
@@ -331,7 +332,7 @@ Touchscreen::Event Gt911::get_event()
 {
     Touchscreen::Event event; // default: type=none
 
-    if (_i2c.busy())
+    if (_i2c.write_read_busy())
         return event; // nothing new
 
     uint32_t now_us;
@@ -377,8 +378,7 @@ void Gt911::start_status_read()
 {
     const uint8_t wr_buf[] = {uint8_t(Reg::TOUCH_STAT >> 8),
                               uint8_t(Reg::TOUCH_STAT)};
-    _i2c.write_read_async_start(_i2c_addr, wr_buf, sizeof(wr_buf), //
-                                _status, sizeof(_status));
+    _i2c.write_read_start(_i2c_addr, wr_buf, sizeof(wr_buf), sizeof(_status));
     _i2c_state = I2cState::status_read;
 }
 
@@ -387,7 +387,7 @@ void Gt911::start_status_write()
 {
     const uint8_t wr_buf[] = {uint8_t(Reg::TOUCH_STAT >> 8),
                               uint8_t(Reg::TOUCH_STAT), 0};
-    _i2c.write_read_async_start(_i2c_addr, wr_buf, sizeof(wr_buf));
+    _i2c.write_read_start(_i2c_addr, wr_buf, sizeof(wr_buf));
     _i2c_state = I2cState::status_write;
 }
 
@@ -395,15 +395,14 @@ void Gt911::start_status_write()
 void Gt911::start_touch_read()
 {
     uint8_t wr_buf[] = {uint8_t(Reg::TOUCH_1 >> 8), uint8_t(Reg::TOUCH_1)};
-    _i2c.write_read_async_start(_i2c_addr, wr_buf, sizeof(wr_buf), //
-                                _touch, sizeof(_touch));
+    _i2c.write_read_start(_i2c_addr, wr_buf, sizeof(wr_buf), sizeof(_touch));
     _i2c_state = I2cState::touch_read;
 }
 
 
 void Gt911::check_status_read(Event &event)
 {
-    if (_i2c.write_read_async_check() == sizeof(_status)) {
+    if (_i2c.write_read_data(_status, sizeof(_status)) == sizeof(_status)) {
         // got the status byte
         bool touch_count_valid = (_status[0] & 0x80) != 0;
         if (touch_count_valid) {
@@ -434,7 +433,7 @@ void Gt911::check_status_read(Event &event)
 
 void Gt911::check_touch_read(Event &event)
 {
-    if (_i2c.write_read_async_check() == sizeof(_touch)) {
+    if (_i2c.write_read_data(_touch, sizeof(_touch)) == sizeof(_touch)) {
         // got a touch
         int x = (int(_touch[1]) << 8) | _touch[0];
         int y = (int(_touch[3]) << 8) | _touch[2];
